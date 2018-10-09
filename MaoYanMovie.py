@@ -18,8 +18,10 @@ __mtime__ = '2018/10/8'
                   ┃┫┫  ┃┫┫
                   ┗┻┛  ┗┻┛
 """
+from multiprocessing.pool import Pool
 
 import pymysql
+import re
 import requests
 from lxml import etree
 import json
@@ -36,21 +38,24 @@ from retrying import retry
 
 class MaoYanSpider():
     def __init__(self):
-        self.start_url = "http://piao.qunar.com/ticket/list.htm?keyword={}&from=mps_search_suggest&sort=pp&page={}"
+        self.start_url = "http://maoyan.com/films?showType=2&offset={}"
         self.proxy_url = 'http://127.0.0.1:5555/random'
 
         # 数据库配置
         self.db_config = {
-            "host": "192.168.85.141",
+            "host": "127.0.1.1",
             "database": "spider",
             "user": "root",
-            "password": "mysql",
+            "password": "cyh187977",
             "port": 3306,
             "charset": "utf8"
         }
         self.db = pymysql.connect(**self.db_config)
         self.cursor = self.db.cursor()
-    
+        self.headers = {
+            "Referer": "http://maoyan.com",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/67.0.3396.87 Safari/537.36",
+        }
     def get_proxy(self):
         try:
             res = requests.get(self.proxy_url)
@@ -60,21 +65,42 @@ class MaoYanSpider():
                 return proxy
         except Exception as e:
             return None
-    
+        
+    def get_fake_agent(self):
+        ua = UserAgent()
+        self.headers['User-Agent'] = ua.random
+        return self.headers
+
     # 构造每个地区的前十页景点的url
-    def get_html(self):
-        # place = input("请输入想搜索的省份：")
-        pass
-
+    @retry()
+    def get_html(self,url):
+        headers = self.get_fake_agent()
+        # proxy = self.get_proxy()
+        # print("本次使用的代理为:{}".format(proxy))
+        # proxies = {
+        #     'http': 'http://' + proxy,
+        #     'https': 'https://' + proxy
+        # }
+        print("本次请求的地址为：{}".format(url))
+        resp = requests.get(url,headers=headers)
+        return resp.content.decode()
+        
     # 发起请求，获取响应
-    def parse_url(self):
-        pass
-
+    def parse_html(self,html):
+        pattern = re.compile('<dd>.*?board-index.*?>(\d+)</i>.*?data-src="(.*?)".*?name"><a'
+                             + '.*?>(.*?)</a>.*?star">(.*?)</p>.*?releasetime">(.*?)</p>'
+                             + '.*?integer">(.*?)</i>.*?fraction">(.*?)</i>.*?</dd>', re.S)
     
-    # 3.提取数据
-    def get_content_list(self):
-        pass
-            #
+        items = re.findall(pattern, html)
+        for item in items:
+            yield {
+                'index': item[0],
+                'image': item[1],
+                'title': item[2],
+                'actor': item[3].strip()[3:],
+                'time': item[4].strip()[5:],
+                'score': item[5] + item[6]
+            }
     
     def save_content_dict(self):
         while True:
@@ -99,16 +125,25 @@ class MaoYanSpider():
             # print('保存完成一页')
             self.content_queue.task_done()
     
-    def run(self):
+    def run(self,offset):
         """
         爬虫主逻辑
         :return:
         """
-        pass
+        url = 'http://maoyan.com/board/4?offset=' + str(offset)
+        # url = "http://maoyan.com/films?showType=2&offset="+ str(offset)
+        html = self.get_html(url)
+        for item in self.parse_html(html):
+            print(item)
 
 
 if __name__ == '__main__':
+    
+    pool = Pool()
     maoyan = MaoYanSpider()
-    maoyan.run()
+    # pool.map(maoyan.run, [i * 10 for i in range(5)])
+    for i in range(10):
+        maoyan.run(i*10)
+        
 
 
