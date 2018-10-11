@@ -61,8 +61,6 @@ def create_woff(html):
     return newFont
 
 # 字体解密 将源码不可读数字替换成可读数字
-
-
 def modify_html(newFont, html):
     baseFont = TTFont('./3a3b3fa669eb498c3d519e768855622b2084.woff')
     uniList = newFont['cmap'].tables[0].ttFont.getGlyphOrder()
@@ -90,8 +88,6 @@ def modify_html(newFont, html):
     return html
 
 # 解析网页 获取电影相关数据
-
-
 def parse_page(html):
     pattern = re.compile('<dd>.*?board-index-.*?>(.*?)</i>.*?data-src="(.*?)".*?'
                          + 'title="(.*?)".*?class="star">(.*?)</p>.*?releasetime">(.*?)</p>.*?'
@@ -111,8 +107,6 @@ def parse_page(html):
         }
 
 # 写入
-
-
 def write_to_file(content):
     with open('猫眼最受期待榜.txt', 'a', encoding='utf-8') as f:
         f.write(json.dumps(content, ensure_ascii=False) + '\n')
@@ -126,7 +120,6 @@ def main(offset):
         print(item)
         write_to_file(item)
 
-#多进程 虽然不需要 有点杀鸡用牛刀
 if __name__ == '__main__':
     pool = Pool()
     pool.map(main,[i * 10 for i in range(5)])
