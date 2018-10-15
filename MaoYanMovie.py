@@ -141,9 +141,7 @@ if __name__ == '__main__':
     
     pool = Pool()
     maoyan = MaoYanSpider()
-    # pool.map(maoyan.run, [i * 10 for i in range(5)])
-    for i in range(10):
-        maoyan.run(i*10)
+    pool.map(maoyan.run, [i * 10 for i in range(5)])
         
 
 
