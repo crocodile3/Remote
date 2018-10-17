@@ -18,9 +18,9 @@ __mtime__ = '2018/10/16'
                   ┃┫┫  ┃┫┫
                   ┗┻┛  ┗┻┛
 """
+from pprint import pprint
 
-
-
+import re
 import requests
 import math
 import random
@@ -28,19 +28,36 @@ import random
 from Crypto.Cipher import AES
 import codecs
 import base64
+import json
 
+from fake_useragent import UserAgent
+from retrying import retry
+
+
+def get_fake_agent():
+    ua = UserAgent()
+    userAgent = ua.random
+    return userAgent
 
 
 headers={'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
              'Accept-Encoding': 'gzip, deflate',
              'Accept-Language': 'zh-CN,zh;q=0.9',
              'Connection': 'keep-alive',
-             'Cookie': 'WM_TID=36fj4OhQ7NdU9DhsEbdKFbVmy9tNk1KM; _iuqxldmzr_=32; _ntes_nnid=26fc3120577a92f179a3743269d8d0d9,1536048184013; _ntes_nuid=26fc3120577a92f179a3743269d8d0d9; __utmc=94650624; __utmz=94650624.1536199016.26.8.utmcsr=google|utmccn=(organic)|utmcmd=organic|utmctr=(not%20provided); WM_NI=2Uy%2FbtqzhAuF6WR544z5u96yPa%2BfNHlrtTBCGhkg7oAHeZje7SJiXAoA5YNCbyP6gcJ5NYTs5IAJHQBjiFt561sfsS5Xg%2BvZx1OW9mPzJ49pU7Voono9gXq9H0RpP5HTclE%3D; WM_NIKE=9ca17ae2e6ffcda170e2e6eed5cb8085b2ab83ee7b87ac8c87cb60f78da2dac5439b9ca4b1d621f3e900b4b82af0fea7c3b92af28bb7d0e180b3a6a8a2f84ef6899ed6b740baebbbdab57394bfe587cd44b0aebcb5c14985b8a588b6658398abbbe96ff58d868adb4bad9ffbbacd49a2a7a0d7e6698aeb82bad779f7978fabcb5b82b6a7a7f73ff6efbd87f259f788a9ccf552bcef81b8bc6794a686d5bc7c97e99a90ee66ade7a9b9f4338cf09e91d33f8c8cad8dc837e2a3; JSESSIONID-WYYY=G%5CSvabx1X1F0JTg8HK5Z%2BIATVQdgwh77oo%2BDOXuG2CpwvoKPnNTKOGH91AkCHVdm0t6XKQEEnAFP%2BQ35cF49Y%2BAviwQKVN04%2B6ZbeKc2tNOeeC5vfTZ4Cme%2BwZVk7zGkwHJbfjgp1J9Y30o1fMKHOE5rxyhwQw%2B%5CDH6Md%5CpJZAAh2xkZ%3A1536204296617; __utma=94650624.1052021654.1536048185.1536199016.1536203113.27; __utmb=94650624.12.10.1536203113',
              'Host': 'music.163.com',
              'Referer': 'http://music.163.com/',
              'Upgrade-Insecure-Requests': '1',
-             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
-                           'Chrome/66.0.3359.181 Safari/537.36'}
+             'User-Agent': get_fake_agent()}
+
+def get_proxy(self):
+    try:
+        res = requests.get(self.proxy_url)
+        print(res.text)
+        if res.status_code == 200:
+            proxy = res.text
+            return proxy
+    except Exception as e:
+        return None
 
 # 构造函数获取歌手信息
 def get_comments_json(url, data):
@@ -110,9 +127,55 @@ def get_params(page):
     # limit最大值为100,当设为100时,获取第二页时,默认前一页是20个评论,也就是说第二页最新评论有80个,有20个是第一页显示的
     # msg = '{"rid":"R_SO_4_1302938992","offset":"0","total":"True","limit":"100","csrf_token":""}'
     # 偏移量
+    # todo 此处需要根据传入的参数进行判断，是请求哪一个api,然后匹配适合的msg
     offset = (page-1) * 20
     # offset和limit是必选参数,其他参数是可选的,其他参数不影响data数据的生成
     msg = '{"offset":' + str(offset) + ',"total":"True","limit":"20","csrf_token":""}'
+    key = '0CoJUm6Qyw8W8jud'
+    f = '00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7'
+    e = '010001'
+    enctext = AESencrypt(msg, key)
+    # 生成长度为16的随机字符串
+    i = generate_random_strs(16)
+
+    # 两次AES加密之后得到params的值
+    encText = AESencrypt(enctext, i)
+    # RSA加密之后得到encSecKey的值
+    encSecKey = RSAencrypt(i, e, f)
+    return encText, encSecKey
+
+
+# 获取参数
+def get_paramsv1(info):
+    # msg也可以写成msg = {"offset":"页面偏移量=(页数-1) *　20", "limit":"20"},offset和limit这两个参数必须有(js)
+    # limit最大值为100,当设为100时,获取第二页时,默认前一页是20个评论,也就是说第二页最新评论有80个,有20个是第一页显示的
+    # msg = '{"rid":"R_SO_4_1302938992","offset":"0","total":"True","limit":"100","csrf_token":""}'
+    # 偏移量
+    # todo 此处需要根据传入的参数进行判断，是请求哪一个api,然后匹配适合的msg
+    """
+    top_song <---------------> {offset: "0", total: "true", limit: "60", csrf_token: ""}
+    lyric    <---------------> {"id":"483671599","lv":-1,"tv":-1,"csrf_token":""}
+    comment  <---------------> {"offset":"0","total":"True","limit":"20","csrf_token":""}
+    :param kwargs:
+    :return:
+    """
+    msg = ''
+    if info['name'] == 'top_song':
+        msg = '{offset: "0", total: "true", limit: "60", csrf_token: ""}'
+    elif info['name'] == 'lyric':
+        msg = '{"id":"483671599","lv":-1,"tv":-1,"csrf_token":""}'
+        # song_id = info['song_id']
+        # msg = '{"id":'+song_id+',"lv":-1,"tv":-1,"csrf_token":""}'
+    elif info['name'] == 'comment':
+        page = info['page']
+        offset = (page-1)*20
+        msg = '{"offset":'+str(offset)+',"total":"True","limit":"20","csrf_token":""}'
+    # offset和limit是必选参数,其他参数是可选的,其他参数不影响data数据的生成
+    # msg = '{"offset":' + str(offset) + ',"total":"True","limit":"20","csrf_token":""}'
+    # 1 请求热门歌手api
+    # 2 请求歌曲歌词api
+    # 3 请求歌曲评论的api
+    
     key = '0CoJUm6Qyw8W8jud'
     f = '00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7'
     e = '010001'
@@ -178,62 +241,139 @@ def comments(html, songname, i, pages, total, filepath):
         j += 1
 
 
-def get_comments():
+def get_comments(song_infos):
+    for song_info in song_infos:
+        song_id = song_info[0]
+        song_name = song_info[1]
 
-    # 歌曲id号
-    songid = 38592976
-
-    # 歌曲名字
-    songname = "Dream it possible"
-    # 文件存储路径
-    filepath = songname + ".txt"
-    page = 1
-    params, encSecKey = get_params(page)
-
-    url = 'https://music.163.com/weapi/v1/resource/comments/R_SO_4_' + str(songid) + '?csrf_token='
-    data = {'params': params, 'encSecKey': encSecKey}
-    # url = 'https://music.163.com/#/song?id=19292984'
-    # 获取第一页评论
-    html = get_comments_json(url, data)
-    # 评论总数
-    total = html['total']
-    # 总页数
-    pages = math.ceil(total / 20)
-    hotcomments(html, songname, page, pages, total, filepath)
-    comments(html, songname, page, pages, total, filepath)
-
-    # 开始获取歌曲的全部评论
-    page = 2
-    while page <= pages:
-
-        params, encSecKey = get_params(page)
+        # 文件存储路径
+        filepath = song_name + ".txt"
+        page = 1
+        info = {'name':'comment','page':page}
+        params, encSecKey = get_paramsv1(info)
+        print("获取{}的评论".format(song_name))
+        url = 'https://music.163.com/weapi/v1/resource/comments/R_SO_4_' + str(song_id) + '?csrf_token='
         data = {'params': params, 'encSecKey': encSecKey}
+        # url = 'https://music.163.com/#/song?id=19292984'
+        # 获取第一页评论
         html = get_comments_json(url, data)
-        # 从第二页开始获取评论
-        comments(html, songname, page, pages, total, filepath)
-        page += 1
+        # 评论总数
+        total = html['total']
+        # 总页数
+        pages = math.ceil(total / 20)
+        hotcomments(html, song_name, page, pages, total, filepath)
+        comments(html, song_name, page, pages, total, filepath)
+    
+        # 开始获取歌曲的全部评论
+        page = 2
+        while page <= pages:
+            info = {'name': 'comment', 'page': page}
+            params, encSecKey = get_paramsv1(info)
+            data = {'params': params, 'encSecKey': encSecKey}
+            html = get_comments_json(url, data)
+            # 从第二页开始获取评论
+            comments(html, song_name, page, pages, total, filepath)
+            page += 1
 
+def get_params_singger():
+    offset = 0
+    # offset和limit是必选参数,其他参数是可选的,其他参数不影响data数据的生成
+    """
+    {offset: "0", total: "true", limit: "60", csrf_token: ""}
+    """
+   
+    msg = '{"offset":' + str(offset) + ',"total":"True","limit":"60","csrf_token":""}'
+    key = '0CoJUm6Qyw8W8jud'
+    f = '00e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cfe4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7'
+    e = '010001'
+    enctext = AESencrypt(msg, key)
+    # 生成长度为16的随机字符串
+    i = generate_random_strs(16)
+    
+    # 两次AES加密之后得到params的值
+    encText = AESencrypt(enctext, i)
+    # RSA加密之后得到encSecKey的值
+    encSecKey = RSAencrypt(i, e, f)
+    return encText, encSecKey
 
-
+# @retry()
 def get_singer_list():
     """
     获取歌手列表
     :return:
     url= "https://music.163.com/#/discover/artist/cat?id=1001&initial=65"
-    
     """
-    params, encSecKey = get_params(page)
+    info = {"name":"top_song"}
+    params, encSecKey = get_paramsv1(info)
     data = {'params': params, 'encSecKey': encSecKey}
     url = "https://music.163.com/weapi/artist/top?csrf_token="
-    requests.post(url,headers=headers)
-    
+    res = requests.post(url,headers=headers,data=data)
+    artists = json.loads(res.text).get("artists")
+    singer_list = []
+    for temp in artists:
+        singer_id = temp.get("id")
+        singer_name = temp.get("name")
+        singer_img_url = temp.get("picUrl")
+        music_size = temp.get("musicSize")
+        singer = dict(
+            singer_id=singer_id,
+            singer_name=singer_name,
+            singer_img_url=singer_img_url,
+            music_size = music_size
+                    )
+        singer_list.append(singer)
+    return singer_list
 
+# @retry()
+def get_song(singer_id):
+    url = "https://music.163.com/artist?id={}".format(singer_id)
+    res = requests.get(url,headers=headers)
+    html = res.text
+    ptn = '<li><a href="\/song\?id=(\d+)">(.*?)<\/a>'
+    # 只获取前十首歌曲
+    song_info = re.findall(ptn,html,re.I)[:10]
+    print("共获取到10首歌：{}".format(song_info))
+    return song_info
 
+def save_lyric(name,content):
+    path = "lyric/"+name+"txt"
+    with open(path,"w") as f:
+        f.write(content)
+
+# @retry()
+def get_lyrics(song_infos):
+    """
+    获取歌曲的歌词
+    :return:
+    data的形式：{"id":"483671599","lv":-1,"tv":-1,"csrf_token":""}
+    """
+    url = 'https://music.163.com/weapi/song/lyric?csrf_token='
+    for song_info in song_infos:
+        song_id = song_info[0]
+        song_name = song_info[1]
+        print("获取{}的歌词".format(song_name))
+        info = {"name": "lyric","id":song_id}
+        params, encSecKey = get_paramsv1(info)
+        data = {'params': params, 'encSecKey': encSecKey}
+        res = requests.post(url, headers=headers, data=data)
+        lyric = json.loads(res.text).get('lrc').get("lyric")
+        # todo 保存歌词
+        save_lyric(song_name,lyric)
+        
+        
+def main():
+    # 1 获取热门歌手列表
+    singer_list = get_singer_list()
+    # 2 获取歌手前十位的歌曲
+    for singer in singer_list:
+        singer_id = singer.get('singer_id')
+        print("获取{}的歌单".format(singer['singer_name']))
+        song_infos = get_song(singer_id)
+        # 获取该歌曲的歌词
+        get_lyrics(song_infos)
+        # 获取该歌曲的评论
+        get_comments(song_infos)
 
 
 if __name__ == "__main__":
-    pass
-    # 1 获取歌手列表
-    # 2 获取歌手歌曲列表
-    # 3 进入歌曲详情页
-    # 4 获取歌曲评论
+    main()
