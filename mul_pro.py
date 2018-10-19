@@ -18,24 +18,58 @@ __mtime__ = '2018/10/12'
                   ┃┫┫  ┃┫┫
                   ┗┻┛  ┗┻┛
 """
-import multiprocessing
-import random
-import time
+from numpy.random import random_integers
+from numpy.random import randn
+import numpy as np
+import timeit
+import argparse
+import multiprocessing as mp
+import matplotlib.pyplot as plt
+
+def simulate(size):
+    n=0
+    mean = 0
+    M2 = 0
+    
+    speed = randn(10000)
+    for i in range(1000):
+        n = n+1
+        indices = random_integers(0,len(speed)-1,size=size)
+        x = (1+speed[indices]).prod()
+        delta = x -mean
+        mean = mean + delta/n
+        M2 = M2 +delta*(x-mean)
+    return mean
+
+def serial():
+    start  = timeit.default_timer()
+    for i in range(10,50):
+        simulate(i)
+        
+    end = timeit.default_timer()-start
+    print("Serial time",end)
+    return end
+
+def parallel(nprocs):
+    start = timeit.default_timer()
+    p = mp.Pool(nprocs,'Pool Create time :{}'.format(timeit.default_timer()-start))
+    p.map(simulate,[i for i in range(10,50)])
+    print()
+    p.close()
+    p.join()
+    end = timeit.default_timer()-start
+    print(nprocs,'Parallel time : {}'.format(end))
+    return end
 
 
-def process(num):
-    print("process:{}".format(num))
-    time.sleep(random.uniform(0.5, 3))
-    
-    
 if __name__ == '__main__':
-    # time1 = time.localtime()
-    for i in range(10):
-        p = multiprocessing.Process(target=process, args=(i,))
-        p.start()
-
-    print('CPU number:' + str(multiprocessing.cpu_count()))
-    for p in multiprocessing.active_children():
-        print('Child process name: ' + p.name + ' id: ' + str(p.pid))
-
-    print('Process Ended')
+    rations = []
+    baseline = serial()
+    for i in range(1,mp.cpu_count()):
+        rations.append(baseline/parallel(i))
+        
+    plt.xlabel('# process')
+    plt.ylabel('Serial/Parallel')
+    plt.plot(np.arange(1,mp.cpu_count()),rations)
+    plt.grid(True)
+    plt.show()
