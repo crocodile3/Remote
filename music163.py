@@ -18,10 +18,12 @@ __mtime__ = '2018/10/16'
                   ┃┫┫  ┃┫┫
                   ┗┻┛  ┗┻┛
 """
+import multiprocessing
 import time
 from pprint import pprint
 
 import re
+import redis
 import requests
 import math
 import random
@@ -32,24 +34,42 @@ import base64
 import json
 
 import pymysql
+from DBUtils.PooledDB import PooledDB
 
+
+from multiprocessing import Pool
 from fake_useragent import UserAgent
 from retrying import retry
 
+import threading
+lock = threading.Lock()
 #################----MySQL配置----#####################
 MYSQL_HOST = "127.0.0.1"
 MYSQL_DATABASE = "spider"
 MYSQL_USER = "root"
 MYSQL_PASSWORD = "cyh187977"
 MYSQL_PORT = 3306
+#################----MySQL配置----#####################
 
-
+#################----Redis配置----#####################
+redis_config = {
+    'host':'127.0.0.1',
+    'port':6379,
+    'password':'spider',
+    'decode_responses':True
+}
+singers_queue = 'singers'
+songs_queue = 'songs'
 #################----MySQL配置----#####################
 
 
+redis_client = redis.StrictRedis(**redis_config)
+
 def open_mysql():
-    global db
-    db = pymysql.connect(
+    global pool
+    # pool = ConnectionPool(**config)
+    # pool.connect()
+    pool = pymysql.connect(
         host=MYSQL_HOST,
         database=MYSQL_DATABASE,
         user=MYSQL_USER,
@@ -57,8 +77,21 @@ def open_mysql():
         port=MYSQL_PORT,
         charset='utf8'
     )
+    # pool = PooledDB(creator=pymysql,
+    #                 maxconnections=20,
+    #                 mincached=10,
+    #                 maxcached=None,
+    #                 blocking=True,
+    #                 host=MYSQL_HOST,
+    #                 database=MYSQL_DATABASE,
+    #                 user=MYSQL_USER,
+    #                 password=MYSQL_PASSWORD,
+    #                 port=MYSQL_PORT,
+    #                 charset='utf8')
+    # pool = pool.connection()
     global cursor
-    cursor = db.cursor()
+    # cursor = pool.cursor(cursor=pymysql.cursors.DictCursor)
+    cursor = pool.cursor()
 
 
 def get_fake_agent():
@@ -93,12 +126,12 @@ def get_proxy():
 def get_comments_json(url, data):
     try:
         # todo 需使用代理
-        proxy = get_proxy()
-        proxies = {
-            'http': 'http://' + proxy,
-            'https': 'https://' + proxy
-        }
-        r = requests.post(url, headers=headers, data=data,proxies=proxies)
+        # proxy = get_proxy()
+        # proxies = {
+        #     'http': 'http://' + proxy,
+        #     'https': 'https://' + proxy
+        # }
+        r = requests.post(url, headers=headers, data=data)
         r.encoding = "utf-8"
         if r.status_code == 200:
             # 返回json格式的数据
@@ -191,7 +224,10 @@ def get_paramsv1(info):
     """
     msg = ''
     if info['name'] == 'top_song':
-        msg = '{offset: "0", total: "true", limit: "60", csrf_token: ""}'
+        page = info['page']
+        offset = page * 60
+        msg = '{"offset":' + str(offset) + ', total: "true", limit: "60", csrf_token: ""}'
+        print(msg)
     elif info['name'] == 'lyric':
         msg = '{"id":'+info['id']+',"lv":-1,"tv":-1,"csrf_token":""}'
         # song_id = info['song_id']
@@ -252,7 +288,7 @@ def save_comment(comment_dict):
     values = ",".join(['%s'] * len(comment_dict))
     sql = 'insert into %s (%s) values (%s)' % ("song_comment", keys, values)
     cursor.execute(sql, tuple(comment_dict.values()))
-    db.commit()
+    pool.commit()
 
 
 def comments(html, song_id, songname, i, pages, total, filepath):
@@ -302,50 +338,51 @@ def comments(html, song_id, songname, i, pages, total, filepath):
             j += 1
 
 
-def get_comments(song_infos,singer):
-    for song_info in song_infos:
-        song_id = song_info[0]
-        song_name = song_info[1]
-        
-        # 文件存储路径
-        filepath = "comment/" + song_name + ".txt"
-        page = 1
-        info = {'name': 'comment', 'page': page}
-        params, encSecKey = get_paramsv1(info)
-        print("获取{}的评论".format(song_name))
-        url = 'https://music.163.com/weapi/v1/resource/comments/R_SO_4_' + str(song_id) + '?csrf_token='
-        data = {'params': params, 'encSecKey': encSecKey}
-        # url = 'https://music.163.com/#/song?id=19292984'
-        # 获取第一页评论
-        html = get_comments_json(url, data)
-        # 评论总数
-        if html:
-            num = html['total']
-            # 总页数
+def get_comments(song_id,song_name):
+    song_id = song_id
+    song_name = song_name
     
-            song_dict = dict(
-                song_id=song_id,
-                song_name=song_name,
-                singer=singer,
-                comment_num=num,
-            )
-            # print(song_dict)
-            save_song_info(song_dict)
-            
-            pages = math.ceil(num / 20)
-            hotcomments(html, song_id, song_name, page, pages, num, filepath)
-            comments(html, song_id, song_name, page, pages, num, filepath)
-            
-            # 开始获取歌曲的全部评论
-            page = 2
-            while page <= pages:
-                info = {'name': 'comment', 'page': page}
-                params, encSecKey = get_paramsv1(info)
-                data = {'params': params, 'encSecKey': encSecKey}
-                html = get_comments_json(url, data)
-                # 从第二页开始获取评论
-                comments(html, song_id, song_name, page, pages, num, filepath)
-                page += 1
+    # 文件存储路径
+    filepath = "comment/" + song_name + ".txt"
+    page = 1
+    info = {'name': 'comment', 'page': page}
+    params, encSecKey = get_paramsv1(info)
+    print("获取{}的评论".format(song_name))
+    url = 'https://music.163.com/weapi/v1/resource/comments/R_SO_4_' + str(song_id) + '?csrf_token='
+    data = {'params': params, 'encSecKey': encSecKey}
+    # url = 'https://music.163.com/#/song?id=19292984'
+    # 获取第一页评论
+    html = get_comments_json(url, data)
+    # 评论总数
+    if html:
+        num = html['total']
+        # 总页数
+
+        song_dict = dict(
+            song_id=song_id,
+            song_name=song_name,
+            # singer=singer,
+            comment_num=num,
+        )
+        # print(song_dict)
+        save_song_info(song_dict)
+        
+        pages = math.ceil(num / 20)
+        hotcomments(html, song_id, song_name, page, pages, num, filepath)
+        comments(html, song_id, song_name, page, pages, num, filepath)
+        
+        # 开始获取歌曲的全部评论
+        page = 2
+        while page <= pages:
+            info = {'name': 'comment', 'page': page}
+            params, encSecKey = get_paramsv1(info)
+            data = {'params': params, 'encSecKey': encSecKey}
+            html = get_comments_json(url, data)
+            # 从第二页开始获取评论
+            # comments(html, song_id, song_name, page, pages, num, filepath)
+            td = threading.Thread(target=comments,args = (html, song_id, song_name, page, pages, num, filepath))
+            td.start()
+            page += 1
 
 
 def get_params_singger():
@@ -370,149 +407,203 @@ def get_params_singger():
     return encText, encSecKey
 
 
-@retry()
-def get_singer_list():
+
+# @retry()
+def get_singer_list(page):
     """
     获取歌手列表
     :return:
     url= "https://music.163.com/#/discover/artist/cat?id=1001&initial=65"
     """
-    try:
-        info = {"name": "top_song"}
-        params, encSecKey = get_paramsv1(info)
-        data = {'params': params, 'encSecKey': encSecKey}
-        url = "https://music.163.com/weapi/artist/top?csrf_token="
-        proxy = get_proxy()
-        proxies = {
-            'http': 'http://' + proxy,
-            'https': 'https://' + proxy
-        }
-        res = requests.post(url, headers=headers, data=data,proxies=proxies)
-        artists = json.loads(res.text).get("artists")
-        singer_list = []
-        for temp in artists:
-            singer_id = temp.get("id")
-            singer_name = temp.get("name")
-            singer_img_url = temp.get("picUrl")
-            music_size = temp.get("musicSize")
-            singer = dict(
-                singer_id=singer_id,
-                singer_name=singer_name,
-                singer_img_url=singer_img_url,
-                music_size=music_size
-            )
-            singer_list.append(singer)
-        return singer_list
-    
-    except Exception as e:
-        print("获取歌手列表失败")
+    info = {"name": "top_song","page":page}
+    params, encSecKey = get_paramsv1(info)
+    data = {'params': params, 'encSecKey': encSecKey}
+    url = "https://music.163.com/weapi/artist/top?csrf_token="
+    # proxy = get_proxy()
+    # proxies = {
+    #     'http': 'http://' + proxy,
+    #     'https': 'https://' + proxy
+    # }
+    res = requests.post(url, headers=headers, data=data)
+    artists = json.loads(res.text).get("artists")
+    for temp in artists:
+        singer_id = temp.get("id")
+        singer_name = temp.get("name")
+        singer_img_url = temp.get("picUrl")
+        music_size = temp.get("musicSize")
+        singer = dict(
+            singer_id=singer_id,
+            singer_name=singer_name,
+            # singer_img_url=singer_img_url,
+            # music_size=music_size
+        )
+        redis_client.rpush(singers_queue,singer)
+
+
 
 
 @retry()
-def get_song(singer_id):
-    try:
-        url = "https://music.163.com/artist?id={}".format(singer_id)
-        proxy = get_proxy()
-        proxies = {
-            'http': 'http://' + proxy,
-            'https': 'https://' + proxy
-        }
-        res = requests.get(url, headers=headers,proxies=proxies,timeout=30)
-        html = res.text
-        ptn = '<li><a href="\/song\?id=(\d+)">(.*?)<\/a>'
-        # 只获取前十首歌曲
-        song_info = re.findall(ptn, html, re.I)
-        print("共获取到10首歌：{}".format(song_info))
-        return song_info
-    except Exception as e:
-        print("获取{}的歌单失败".format(singer_id))
+def get_song(singer_id,singer_name):
+    
+    # try:
+    url = "https://music.163.com/artist?id={}".format(singer_id)
+    # proxy = get_proxy()
+    # proxies = {
+    #     'http': 'http://' + proxy,
+    #     'https': 'https://' + proxy
+    # }
+    res = requests.get(url, headers=headers,timeout=30)
+    html = res.text
+    ptn = '<li><a href="\/song\?id=(\d+)">(.*?)<\/a>'
+    # 只获取前十首歌曲
+    song_info = re.findall(ptn, html, re.I)
+    for song in song_info:
+        # song = list(song).append(singer_name)
+        # print(song)
+        redis_client.rpush(songs_queue,song)
+        print("已加入一首歌")
+    # except Exception as e:
+    #     print("获取{}的歌单失败-{}".format(singer_id,e))
+    #     # todo 将失败的歌手信息加入到队列中
 
 
 def save_lyric(lyric_dict):
+    open_mysql()
     # path = "lyric/" + name + ".txt"
     # with open(path, "w") as f:
     #     f.write(content)
     keys = ",".join(lyric_dict.keys())
     values = ",".join(['%s'] * len(lyric_dict))
     sql = 'insert into %s (%s) values (%s)' % ("lyric", keys, values)
+    # db.ping(reconnect=True)
+    # lock.acquire()
     cursor.execute(sql, tuple(lyric_dict.values()))
-    db.commit()
-    
+    # lock.release()
+    pool.commit()
+    pool.close()
     
 def save_song_info(song_dict):
+    open_mysql()
     keys = ",".join(song_dict.keys())
     values = ",".join(['%s'] * len(song_dict))
     sql = 'insert into %s (%s) values (%s)' % ("song_info", keys, values)
     cursor.execute(sql, tuple(song_dict.values()))
-    db.commit()
+    pool.commit()
     
 
 
 
-def get_lyrics(song_infos, singer):
+def get_lyrics(song_id,song_name):
     """
     获取歌曲的歌词
     :return:
     data的形式：{"id":"483671599","lv":-1,"tv":-1,"csrf_token":""}
     """
-    print(song_infos)
     url = 'https://music.163.com/weapi/song/lyric?csrf_token='
-    if song_infos:
-        for song_info in song_infos:
-            song_id = song_info[0]
-            song_name = song_info[1]
-            singer = singer
-            print("获取{}的歌词".format(song_name))
-            info = {"name": "lyric", "id": song_id}
-            print(info)
-            params, encSecKey = get_paramsv1(info)
-            data = {'params': params, 'encSecKey': encSecKey}
-            proxy = get_proxy()
-            proxies = {
-                'http': 'http://' + proxy,
-                'https': 'https://' + proxy
-            }
-            try:
-                res = requests.post(url, headers=headers, data=data,proxies=proxies)
-                lyric = json.loads(res.text).get('lrc').get("lyric")
-                lyric = re.sub(r'(\[.*?\])',"",lyric)
-                # # 保存歌曲信息
-                # song_dict = dict(
-                #     song_id=song_id,
-                #     song_name=song_name,
-                #     singer=singer,
-                #     comment_num=num,
-                # )
-                # print(song_dict)
-                # save_song_info(song_dict)
-                # 保存歌词
-                lyric_dict = dict(song_id=song_id, song_name=song_name, lyric=lyric)
-                print(lyric_dict)
-                save_lyric(lyric_dict)
-            except Exception as e:
-                print("获取{}歌词失败".format(song_name))
+    song_id = song_id
+    song_name = song_name
+    # singer = singer
+    print("获取{}的歌词".format(song_name))
+    info = {"name": "lyric", "id": song_id}
+    params, encSecKey = get_paramsv1(info)
+    data = {'params': params, 'encSecKey': encSecKey}
+    # proxy = get_proxy()
+    # proxies = {
+    #     'http': 'http://' + proxy,
+    #     'https': 'https://' + proxy
+    # }
+  
+    res = requests.post(url, headers=headers, data=data)
+    lyric_data = json.loads(res.text)
+    print("-"*100)
+    print(lyric_data)
+    print("-" * 100)
+    if lyric_data :
+        lyric = json.loads(res.text).get('lrc').get("lyric")
+        lyric = re.sub(r'(\[.*?\])',"",lyric)
+        # # 保存歌曲信息
+        # song_dict = dict(
+        #     song_id=song_id,
+        #     song_name=song_name,
+        #     singer=singer,
+        #     comment_num=num,
+        # )
+        # print(song_dict)
+        # save_song_info(song_dict)
+        # 保存歌词
+        lyric_dict = dict(song_id=song_id, song_name=song_name, lyric=lyric)
+        print(lyric_dict)
+        save_lyric(lyric_dict)
+        # except Exception as e:
+        #     print("获取{}歌词失败-{}".format(song_name,e))
 
 
 def main():
-    open_mysql()
+   
     # 1 获取热门歌手列表
+    # pool = Pool(2)
+    # pool.map(get_singer_list,[i for i in range(2) ])
+    # pool.close()
+    # pool.join()
+    # # 2 获取歌单
+    # singer_size = redis_client.llen(singers_queue)
+    # while singer_size > 0:
+    #     for i in range(10):
+    #         singer = redis_client.lpop(singers_queue)
+    #         if singer:
+    #             singer = eval(singer)
+    #             singer_id = singer['singer_id']
+    #             singer_name = singer['singer_name']
+    #             print("获取{}的歌单".format(singer_name))
+    #             thread = threading.Thread(target=get_song,args=(singer_id,singer_name))
+    #             thread.setDaemon(True)
+    #             thread.start()
+        # if singer_size ==0:
+        #     break
+    # 3 获取歌词
+    songs_size = redis_client.llen(songs_queue)
+    while songs_size > 0:
+        for i in range(10):
+            songs = redis_client.lpop(songs_queue)
+            if songs:
+                song = eval(songs)
+                song_id = song[0]
+                song_name = song[1]
+                # thread1 = threading.Thread(target=get_lyrics,args=(song_id,song_name))
+                thread2 = threading.Thread(target=get_comments(song_id,song_name))
+                # thread1.setDaemon(True)
+                # thread1.start()
+                # thread1.join()
+                thread2.setDaemon(True)
+                thread2.start()
+                # thread2.join()
+
+            
+        
     
-    singer_list = get_singer_list()
-    if singer_list:
-        # 2 获取歌手前十位的歌曲
-        for singer in singer_list:
-            singer_id = singer.get('singer_id')
-            singer_name = singer['singer_name']
-            print("获取{}的歌单".format(singer_name))
-            song_infos = get_song(singer_id)
-            # 获取该歌曲的歌词
-            get_lyrics(song_infos, singer_name)
-            # 获取该歌曲的评论
-            # get_comments(song_infos,singer_name)
-         
-       
-    db.close()
+        
+        
+        
+        
+        
+        # for singer in singer_list:
+        #     singer_id = singer.get('singer_id')
+        #     singer_name = singer['singer_name']
+        #     print("获取{}的歌单".format(singer_name))
+        #     song_infos = get_song(singer_id)
+        #     # 获取该歌曲的歌词
+        #     get_lyrics(song_infos, singer_name)
+        #     # 获取该歌曲的评论
+        #     # get_comments(song_infos,singer_name)
+    pool.close()
+
+def get_singer():
+    singer = redis_client.lpop(songs_queue)
+    print(singer)
+    print(type(singer))
 
 
 if __name__ == "__main__":
     main()
+    # get_singer()
+
