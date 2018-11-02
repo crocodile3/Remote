@@ -21,9 +21,11 @@ __mtime__ = '2018/11/1'
 
 import requests
 import json
-from requests_html import HTMLSession
 from xueQiu.settings import *
-from xueQiu.utils import write_to_mysql
+from xueQiu.utils import Mysql
+
+
+mysql = Mysql()
 
 def get_first_user(uid=1102105103):
     uid = uid
@@ -65,13 +67,13 @@ def deal_res(content):
                 stocks_count=stocks_count,
                 cube_count=cube_count
             )
-            write_to_mysql(temp)
+            mysql.write_to_mysql(temp)
             print(temp)
     else:
         users = content.get('followers')
         for user in users:
             uid = user.get('id')
-            # get_first_user(uid)
+            get_first_user(uid)
             name = user.get('screen_name')
             description = user.get('description')
             followers_count = user.get('followers_count')
@@ -95,7 +97,7 @@ def deal_res(content):
                 stocks_count=stocks_count,
                 cube_count=cube_count
             )
-            write_to_mysql(temp)
+            mysql.write_to_mysql(temp)
 
         
 def get_followers(uid,start_url,member_url,follower_url):
