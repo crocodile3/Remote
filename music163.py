@@ -46,16 +46,16 @@ lock = threading.Lock()
 #################----MySQL配置----#####################
 MYSQL_HOST = "127.0.0.1"
 MYSQL_DATABASE = "spider"
-MYSQL_USER = "root"
-MYSQL_PASSWORD = "cyh187977"
-MYSQL_PORT = 3306
+MYSQL_USER = "*******"
+MYSQL_PASSWORD = "*********"
+MYSQL_PORT = *****
 #################----MySQL配置----#####################
 
 #################----Redis配置----#####################
 redis_config = {
     'host': '127.0.0.1',
     'port': 6379,
-    'password': 'spider',
+    'password': '*******',
     'decode_responses': True
 }
 singers_queue = 'singers'
