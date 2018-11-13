@@ -3,8 +3,6 @@
 __title__ = ''
 __author__ = 'Crocodile3'
 __mtime__ = '2018/11/11'
-# code is far away from bugs with the god animal protecting
-    I love animals. They taste delicious.
               ┏┓      ┏┓
             ┏┛┻━━━┛┻┓
             ┃      ☃      ┃
@@ -26,20 +24,35 @@ import csv
 
 from wangyiyun import *
 
-userids = ['1498101589', '513258042', '1549421710', '423739995', '1663720871', '439744832', '39060233', '1596909551',
-           '529778839', '114007921', '315548893', '256570283', '258687043', '1633658529', '501468999', '426885990',
-           '298540359', '93469843', '1309251148', '119831606', '1318121889', '261973902', '555560531', '82457715',
-           '1644266755', '471831753', '326120315', '259341498', '321940878', '413079320', '268696430', '487513531',
-           '1529191804', '1401311265', '1434631787', '603921389', '302937580', '330234846', '415888263', '517973815',
-           '541392244', '614137395', '1663097557', '1627390459', '403807962', '557860163', '403807962', '432040910',
-           '432040910', '456325749', '1651553255', '636286579', '1651553255', '1400276373', '579432059', '583592668',
-           '1640128878', '444868752', '1640128878', '617525499', '474073318', '133829249', '286949137', '1603226009',
-           '1603226009', '432919665', '1291077103', '321132195', '1533456179', '593039915', '1610303789', '323872811',
-           '1654945129', '1400276373', '1654945129', '1445067943', '543906644', '1445067943', '317469289', '1663773714',
-           '333239342', '1532813737', '1532813737', '435697421', '1486245070', '573777714', '67414702', '606029008',
-           '246582102', '378281799', '371996820', '539020159', '621118881', '1400276373', '1400276373', '1400276373',
-           '452635366', '1404484656', '292662031', '49186072']
 
+def get_userid_from_mysql():
+    db = pymysql.connect(
+        host=MYSQL_HOST,
+        database=MYSQL_DATABASE,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        port=MYSQL_PORT,
+        charset='utf8'
+    )
+    cursor = db.cursor()
+    
+    start_num = 160000
+    
+    # 总共多少数据
+    allData = 2000000
+    # 每个批次多少条数据
+    dataOfEach = 1000
+    # 批次
+    while start_num < allData:
+        sql = 'select userid from song_comment1 where id >= ' + str(start_num) + ' and id < ' + str(
+            start_num + dataOfEach) + ';'
+        # print(sql)
+        cursor.execute(sql)
+        data = cursor.fetchall()
+        start_num += dataOfEach
+        yield data
+    db.close()
+    
 
 def get_self_info(user_id):
     #todo 做去重判断
@@ -136,7 +149,12 @@ def get_followeds(userid,fan_count):
 
 
 def get_user_info():
-    [get_self_info(userid) for userid in userids]
+    items = get_userid_from_mysql()
+    [get_self_info(userid[0]) for item in items for userid in item]
+    # for item in items:
+    #     for row in item:
+    #         print(row[0])
+    # [get_self_info(userid[0]) for userid in userids]
         # 现获取用户信息表（里面有关注数和粉丝数）
         # follow_count,fan_count = get_self_info(userid)
         # 获取关注列表
